@@ -29,9 +29,9 @@ namespace CursorMCP.Api.Controllers
         /// <param name="pageSize">Page size (default: 20, max: 100)</param>
         /// <returns>A paginated list of issues</returns>
         [HttpGet("projects/{projectKey}/issues")]
-        [ProducesResponseType(typeof(PaginatedResponse<List<SonarQubeIssue>>), 200)]
+        [ProducesResponseType(typeof(PaginatedResponse<List<SimplifiedSonarQubeIssue>>), 200)]
         [ProducesResponseType(404)]
-        public async Task<ActionResult<PaginatedResponse<List<SonarQubeIssue>>>> GetProjectIssues(
+        public async Task<ActionResult<PaginatedResponse<List<SimplifiedSonarQubeIssue>>>> GetProjectIssues(
             string projectKey, 
             [FromQuery] int pageNumber = 1, 
             [FromQuery] int pageSize = 20)

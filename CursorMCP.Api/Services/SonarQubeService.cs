@@ -51,20 +51,31 @@ namespace CursorMCP.Api.Services
                 Convert.ToBase64String(Encoding.ASCII.GetBytes($"{token}:")));
         }
 
-        public async Task<PaginatedResponse<List<SonarQubeIssue>>> GetProjectIssuesAsync(string projectKey, PaginationParameters parameters)
+        public async Task<PaginatedResponse<List<SimplifiedSonarQubeIssue>>> GetProjectIssuesAsync(string projectKey, PaginationParameters parameters)
         {
             var cacheKey = $"project_issues_{projectKey}_{parameters.PageNumber}_{parameters.PageSize}";
             return await _cacheService.GetOrSetAsync(cacheKey, async () =>
             {
                 var response = await _httpClient.GetFromJsonAsync<SonarQubeIssuesResponse>(
-                    $"api/issues/search?componentKeys={projectKey}&p={parameters.PageNumber}&ps={parameters.PageSize}",
+                    $"api/issues/search?componentKeys={projectKey}&resolved=false&ps={parameters.PageSize}&p={parameters.PageNumber}",
                     _jsonOptions);
 
                 if (response == null)
                     throw new InvalidOperationException("Failed to deserialize SonarQube response");
 
-                return new PaginatedResponse<List<SonarQubeIssue>>(
-                    response.Issues,
+                // Convert to simplified issues with only required properties
+                var simplifiedIssues = response.Issues.Select(issue => new SimplifiedSonarQubeIssue
+                {
+                    Key = issue.Key,
+                    Rule = issue.Rule,
+                    Component = issue.Component,
+                    Project = issue.Project,
+                    Message = issue.Message,
+                    Type = issue.Type
+                }).ToList();
+
+                return new PaginatedResponse<List<SimplifiedSonarQubeIssue>>(
+                    simplifiedIssues,
                     response.Total,
                     parameters.PageNumber,
                     parameters.PageSize
@@ -73,18 +84,28 @@ namespace CursorMCP.Api.Services
         }
 
         public async Task<IssueSnippetSummaryResponse> GetIssueDetailsAsync(string issueKey)
-        {
+        {            
             var cacheKey = $"issue_details_{issueKey}";
             return await _cacheService.GetOrSetAsync(cacheKey, async () =>
             {
-                var response = await _httpClient.GetFromJsonAsync<IssueSnippetSummaryResponse>(
+                var response = await _httpClient.GetFromJsonAsync<Dictionary<string, SonarQubeIssueDetails>>(
                     $"api/sources/issue_snippets?issueKey={issueKey}",
                     _jsonOptions);
 
-                if (response == null)
+                if (response == null || !response.Any())
                     throw new InvalidOperationException("Failed to deserialize SonarQube response");
 
-                return response;
+                var firstItem = response.First();
+                var issueDetails = firstItem.Value;
+
+                // Convert HTML code to plain text
+                var sources = issueDetails.Sources.Select(s => ConvertHtmlToPlainText(s.Code)).ToList();
+                
+                return new IssueSnippetSummaryResponse
+                {
+                    FileName = issueDetails.Component.Name,
+                    Sources = string.Join("\n", sources)
+                };
             }, TimeSpan.FromMinutes(5));
         }
 
@@ -93,14 +114,32 @@ namespace CursorMCP.Api.Services
             var cacheKey = $"issue_fix_{issueKey}";
             return await _cacheService.GetOrSetAsync(cacheKey, async () =>
             {
-                var response = await _httpClient.GetFromJsonAsync<RuleFixSuggestionResponse>(
-                    $"api/rules/fix_suggestions?issueKey={issueKey}",
+                var response = await _httpClient.GetFromJsonAsync<RuleResponse>(
+                    $"api/rules/show?key={issueKey}",
                     _jsonOptions);
 
                 if (response == null)
                     throw new InvalidOperationException("Failed to deserialize SonarQube response");
 
-                return response;
+                var fixSuggestion = new RuleFixSuggestionResponse();
+                
+                foreach (var section in response.Rule.DescriptionSections)
+                {
+                    switch (section.Key)
+                    {
+                        case "introduction":
+                            fixSuggestion.Introduction = section.Content;
+                            break;
+                        case "root_cause":
+                            fixSuggestion.RootCause = section.Content;
+                            break;
+                        case "how_to_fix":
+                            fixSuggestion.HowToFix = section.Content;
+                            break;
+                    }
+                }
+
+                return fixSuggestion;
             }, TimeSpan.FromMinutes(5));
         }
 

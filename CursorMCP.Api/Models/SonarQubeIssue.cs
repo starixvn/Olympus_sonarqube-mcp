@@ -51,6 +51,15 @@ namespace CursorMCP.Api.Models
         [JsonPropertyName("tags")]
         public List<string> Tags { get; set; } = new();
 
+        [JsonPropertyName("transitions")]
+        public List<string> Transitions { get; set; } = new();
+
+        [JsonPropertyName("actions")]
+        public List<string> Actions { get; set; } = new();
+
+        [JsonPropertyName("comments")]
+        public List<object> Comments { get; set; } = new();
+
         [JsonPropertyName("creationDate")]
         public DateTime CreationDate { get; set; }
 
@@ -86,9 +95,6 @@ namespace CursorMCP.Api.Models
 
         [JsonIgnore]
         public CodeSnippet CodeSnippet { get; set; } = new();
-
-        [JsonPropertyName("organization")]
-        public required string Organization { get; set; }
     }
 
     public class TextRange
