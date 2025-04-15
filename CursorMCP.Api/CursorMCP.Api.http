@@ -1,0 +1,6 @@
+@CursorMCP.Api_HostAddress = http://localhost:5100
+
+GET {{CursorMCP.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
