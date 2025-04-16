@@ -8,6 +8,7 @@ using ModelContextProtocol.Server;
 using System.ComponentModel;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Linq;
 
 namespace CursorMCP.Api
 {
@@ -24,14 +25,13 @@ namespace CursorMCP.Api
 
             var result = await sonarQubeService.GetProjectIssuesAsync(projectKey, pageNumber, pageSize);
 
-            if (result == null || result.Count == 0)
+            if (result == null || !result.Any())
             {
                 return "No issues found for project";
             }
 
             // Join the issues into a single string
-            var issuesString = string.Join("\n\n", result.Select(issue => issue.ToString()));
-            return issuesString;
+            return string.Join("\n\n", result.Select(issue => issue.ToString() ?? string.Empty));
         }
 
         [McpServerTool, Description("Get project issues")]
@@ -46,24 +46,24 @@ namespace CursorMCP.Api
                 return "No details found for issue";
             }
 
-            return result.ToString();
+            return result.ToString() ?? string.Empty;
         }
 
-         [McpServerTool, Description("Get project issues")]
-        public static async Task<string>  GetIssueFixSuggestion(
+        [McpServerTool, Description("Get project issues")]
+        public static async Task<string> GetIssueFixSuggestion(
             ISonarQubeService sonarQubeService,
             [Description("rule key")] string ruleKey)
         {            
             var result = await sonarQubeService.GetIssueFixSuggestionAsync(ruleKey);
 
-            if (string.IsNullOrEmpty(result.RootCause) &&
+            if (result == null || (string.IsNullOrEmpty(result.RootCause) &&
                 string.IsNullOrEmpty(result.Introduction) &&
-                string.IsNullOrEmpty(result.HowToFix))
+                string.IsNullOrEmpty(result.HowToFix)))
             {
                 return "No fix suggestion found for rule";
             }
 
-            return result.ToString();
+            return result.ToString() ?? string.Empty;
         }
     }
 }

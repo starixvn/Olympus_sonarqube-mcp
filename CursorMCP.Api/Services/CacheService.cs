@@ -13,19 +13,19 @@ namespace CursorMCP.Api.Services
 
         public CacheService(IMemoryCache cache, IConfiguration configuration)
         {
-            _cache = cache;
-            _configuration = configuration;
+            _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+            _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _isEnabled = configuration.GetValue<bool>("Caching:Enabled");
         }
 
-        public async Task<T?> GetAsync<T>(string key)
+        public Task<T?> GetAsync<T>(string key)
         {
             if (!_isEnabled)
             {
-                return default;
+                return Task.FromResult<T?>(default);
             }
 
-            return _cache.TryGetValue(key, out T value) ? value : default;
+            return Task.FromResult(_cache.TryGetValue(key, out T? value) ? value : default);
         }
 
         public Task SetAsync<T>(string key, T value, TimeSpan? expiration = null)
@@ -50,9 +50,9 @@ namespace CursorMCP.Api.Services
                 return await factory();
             }
 
-            if (_cache.TryGetValue(key, out T cachedValue))
+            if (_cache.TryGetValue(key, out T? cachedValue))
             {
-                return cachedValue;
+                return cachedValue ?? await factory();
             }
 
             var value = await factory();
