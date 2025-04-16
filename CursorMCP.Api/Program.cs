@@ -1,46 +1,22 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using CursorMCP.Api.Services;
-using Microsoft.Extensions.Configuration;
-using Serilog;
-using Serilog.Events;
 using System.Net.Http.Headers;
 using System.Text;
-
+using CursorMCP.Services;
+using Microsoft.Extensions.Configuration;
 
 var builder = Host.CreateEmptyApplicationBuilder(settings: null);
 var configuration = builder.Configuration;
 var services = builder.Services;
+
+builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: false);
+
 builder.Services.AddMcpServer()
     .WithStdioServerTransport()
     .WithToolsFromAssembly();
 
-// Configure Serilog
-var logPath = configuration.GetValue<string>("Logging:File:Path") ?? "logs/sonarqube-api.log";
-var fileSizeLimitBytes = configuration.GetValue<long>("Logging:File:FileSizeLimitBytes", 10485760);
-var maxRollingFiles = configuration.GetValue("Logging:File:MaxRollingFiles", 5);
-
-// Ensure logs directory exists
-var logsDir = Path.GetDirectoryName(logPath);
-if (!string.IsNullOrEmpty(logsDir) && !Directory.Exists(logsDir))
-{
-    Directory.CreateDirectory(logsDir);
-}
-
-Log.Logger = new LoggerConfiguration()
-    .MinimumLevel.Information()
-    .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
-    .WriteTo.Console()
-    .WriteTo.File(
-        logPath,
-        fileSizeLimitBytes: fileSizeLimitBytes,
-        rollingInterval: RollingInterval.Day,
-        retainedFileCountLimit: maxRollingFiles)
-    .CreateLogger();
-
 // Register services
 services.AddMemoryCache();
-services.AddHttpClient();
 services.AddSingleton(_ =>
 {
     var client = new HttpClient();
@@ -60,10 +36,12 @@ services.AddSingleton(_ =>
 
     return client;
 });
-
+services.AddSingleton<ISimpleLogService, SimpleLogService>();
 services.AddSingleton<ICacheService, CacheService>();
 services.AddSingleton<ISonarQubeService, SonarQubeService>();
 
+// Get an instance of ISonarQubeService
+SonarQubeTools.sonarQubeService = services.BuildServiceProvider().GetRequiredService<ISonarQubeService>();
 
 var app = builder.Build();
 

@@ -1,16 +1,14 @@
-using CursorMCP.Api.Services;
 using ModelContextProtocol.Server;
 using System.ComponentModel;
-
-namespace CursorMCP.Api;
+using CursorMCP.Services;
 
 [McpServerToolType]
 public static class SonarQubeTools
 {
+    public static ISonarQubeService sonarQubeService { get; set; }
+
     [McpServerTool, Description("Get project issues")]
-    public static async Task<string> GetProjectIssues(
-        ISonarQubeService sonarQubeService,
-        [Description("The SonarQube project key")] string projectKey)
+    public static async Task<string> GetProjectIssues([Description("The SonarQube project key")] string projectKey)
     {
         try
         {
@@ -31,9 +29,7 @@ public static class SonarQubeTools
     }
 
     [McpServerTool, Description("Get project issues")]
-    public static async Task<string> GetIssueDetails(
-        ISonarQubeService sonarQubeService,
-        [Description("issue key")] string issueKey)
+    public static async Task<string> GetIssueDetails([Description("issue key")] string issueKey)
     {
         try
         {
@@ -53,9 +49,7 @@ public static class SonarQubeTools
     }
 
     [McpServerTool, Description("Get project issues")]
-    public static async Task<string> GetIssueFixSuggestion(
-        ISonarQubeService sonarQubeService,
-        [Description("rule key")] string ruleKey)
+    public static async Task<string> GetIssueFixSuggestion([Description("rule key")] string ruleKey)
     {            
         try
         {

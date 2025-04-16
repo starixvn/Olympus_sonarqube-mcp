@@ -1,6 +1,6 @@
-using CursorMCP.Api.Models;
+namespace CursorMCP.Services;
 
-namespace CursorMCP.Api.Services;
+using Models;
 
 public interface ISonarQubeService
 {

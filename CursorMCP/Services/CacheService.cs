@@ -1,7 +1,7 @@
+namespace CursorMCP.Services;
+
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
-
-namespace CursorMCP.Api.Services;
 
 public class CacheService(IMemoryCache cache, IConfiguration configuration) : ICacheService
 {

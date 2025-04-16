@@ -1,4 +1,4 @@
-namespace CursorMCP.Api.Services;
+namespace CursorMCP.Services;
 
 public interface ICacheService
 {

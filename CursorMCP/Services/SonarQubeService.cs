@@ -1,14 +1,13 @@
+namespace CursorMCP.Services;
+
+using System.Net.Http.Json;
 using System.Text.Json;
-using CursorMCP.Api.Models;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Web;
-using Microsoft.Extensions.Logging;
-using System.Net.Http.Json;
+using Models;
 
-namespace CursorMCP.Api.Services;
-
-public class SonarQubeService(HttpClient httpClient, ICacheService cacheService, ILogger<SonarQubeService> logger) : ISonarQubeService
+public class SonarQubeService(HttpClient httpClient, ICacheService cacheService, ISimpleLogService logger) : ISonarQubeService
 {
     private readonly JsonSerializerOptions jsonOptions = new()
     {
@@ -21,8 +20,8 @@ public class SonarQubeService(HttpClient httpClient, ICacheService cacheService,
         var cacheKey = $"project_issues_{projectKey}_{pageNumber}_{pageSize}";
         return await cacheService.GetOrSetAsync(cacheKey, async () =>
         {
-            logger.LogInformation("Getting project issues for {ProjectKey}", projectKey);
-            logger.LogInformation($"Requesting: api/issues/search?componentKeys={projectKey}&resolved=false&ps={pageSize}&p={pageNumber}");
+            logger.Log($"Getting project issues for {projectKey}");
+            logger.Log($"Requesting: api/issues/search?componentKeys={projectKey}&resolved=false&ps={pageSize}&p={pageNumber}");
 
             var response = await httpClient.GetFromJsonAsync<SonarQubeIssuesResponse>(
                 $"api/issues/search?componentKeys={projectKey}&resolved=false&ps={pageSize}&p={pageNumber}",
@@ -49,8 +48,8 @@ public class SonarQubeService(HttpClient httpClient, ICacheService cacheService,
         var cacheKey = $"issue_details_{issueKey}";
         return await cacheService.GetOrSetAsync(cacheKey, async () =>
         {
-            logger.LogInformation("Getting issue details for {IssueKey}", issueKey);
-            logger.LogInformation($"Requesting: api/sources/issue_snippets?issueKey={issueKey}");
+            logger.Log($"Getting issue details for {issueKey}");
+            logger.Log($"Requesting: api/sources/issue_snippets?issueKey={issueKey}");
 
             var response = await httpClient.GetFromJsonAsync<Dictionary<string, SonarQubeIssueDetails>>(
                 $"api/sources/issue_snippets?issueKey={issueKey}",
@@ -78,8 +77,8 @@ public class SonarQubeService(HttpClient httpClient, ICacheService cacheService,
         var cacheKey = $"issue_fix_{issueKey}";
         return await cacheService.GetOrSetAsync(cacheKey, async () =>
         {
-            logger.LogInformation("Getting issue fix suggestion for {IssueKey}", issueKey);
-            logger.LogInformation($"Requesting: api/rules/show?key={issueKey}");
+            logger.Log($"Getting issue fix suggestion for {issueKey}");
+            logger.Log($"Requesting: api/rules/show?key={issueKey}");
 
             var response = await httpClient.GetFromJsonAsync<RuleResponse>(
                 $"api/rules/show?key={issueKey}",
@@ -212,6 +211,11 @@ public class IssueSnippetSummaryResponse
 
     [JsonPropertyName("sources")]
     public string Sources { get; set; } = string.Empty;
+
+    public override string ToString()
+    {
+        return $"FileName: {FileName}\nSources: {Sources}";
+    }
 }
 
 public class SourceLine

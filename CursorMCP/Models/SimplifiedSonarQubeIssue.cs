@@ -1,6 +1,6 @@
-using System.Text.Json.Serialization;
+namespace CursorMCP.Models;
 
-namespace CursorMCP.Api.Models;
+using System.Text.Json.Serialization;
 
 public class SimplifiedSonarQubeIssue
 {
