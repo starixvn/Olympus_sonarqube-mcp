@@ -1,12 +1,8 @@
-using System;
-using System.Threading.Tasks;
+namespace CursorMCP.Api.Services;
 
-namespace CursorMCP.Api.Services
+public interface ICacheService
 {
-    public interface ICacheService
-    {
-        Task<T?> GetAsync<T>(string key);
-        Task SetAsync<T>(string key, T value, TimeSpan? expiration = null);
-        Task<T> GetOrSetAsync<T>(string key, Func<Task<T>> factory, TimeSpan? expiration = null);
-    }
-} 
+    Task<T?> GetAsync<T>(string key);
+    Task SetAsync<T>(string key, T value, TimeSpan? expiration = null);
+    Task<T> GetOrSetAsync<T>(string key, Func<Task<T>> factory, TimeSpan? expiration = null);
+}

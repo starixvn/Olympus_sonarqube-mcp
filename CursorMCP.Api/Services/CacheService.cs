@@ -1,77 +1,64 @@
-using System;
-using System.Threading.Tasks;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 
-namespace CursorMCP.Api.Services
+namespace CursorMCP.Api.Services;
+
+public class CacheService(IMemoryCache cache, IConfiguration configuration) : ICacheService
 {
-    public class CacheService : ICacheService
+    private readonly IMemoryCache cache = cache ?? throw new ArgumentNullException(nameof(cache));
+    private readonly IConfiguration configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+    private readonly bool isEnabled = configuration.GetValue<bool>("Caching:Enabled");
+
+    public Task<T?> GetAsync<T>(string key)
     {
-        private readonly IMemoryCache _cache;
-        private readonly IConfiguration _configuration;
-        private readonly bool _isEnabled;
+        return !isEnabled 
+            ? Task.FromResult<T?>(default) 
+            : Task.FromResult(cache.TryGetValue(key, out T? value) ? value : default);
+    }
 
-        public CacheService(IMemoryCache cache, IConfiguration configuration)
+    public Task SetAsync<T>(string key, T value, TimeSpan? expiration = null)
+    {
+        if (!isEnabled)
         {
-            _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-            _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-            _isEnabled = configuration.GetValue<bool>("Caching:Enabled");
-        }
-
-        public Task<T?> GetAsync<T>(string key)
-        {
-            if (!_isEnabled)
-            {
-                return Task.FromResult<T?>(default);
-            }
-
-            return Task.FromResult(_cache.TryGetValue(key, out T? value) ? value : default);
-        }
-
-        public Task SetAsync<T>(string key, T value, TimeSpan? expiration = null)
-        {
-            if (!_isEnabled)
-            {
-                return Task.CompletedTask;
-            }
-
-            var expirationTime = expiration ?? TimeSpan.FromMinutes(_configuration.GetValue<int>("Caching:DefaultExpirationMinutes"));
-            var cacheEntryOptions = new MemoryCacheEntryOptions()
-                .SetAbsoluteExpiration(expirationTime);
-
-            _cache.Set(key, value, cacheEntryOptions);
             return Task.CompletedTask;
         }
 
-        public async Task<T> GetOrSetAsync<T>(string key, Func<Task<T>> factory, TimeSpan? expiration = null)
+        var expirationTime = expiration ?? TimeSpan.FromMinutes(configuration.GetValue<int>("Caching:DefaultExpirationMinutes"));
+        var cacheEntryOptions = new MemoryCacheEntryOptions()
+            .SetAbsoluteExpiration(expirationTime);
+
+        cache.Set(key, value, cacheEntryOptions);
+        return Task.CompletedTask;
+    }
+
+    public async Task<T> GetOrSetAsync<T>(string key, Func<Task<T>> factory, TimeSpan? expiration = null)
+    {
+        if (!isEnabled)
         {
-            if (!_isEnabled)
-            {
-                return await factory();
-            }
-
-            if (_cache.TryGetValue(key, out T? cachedValue))
-            {
-                return cachedValue ?? await factory();
-            }
-
-            var value = await factory();
-            var expirationTime = expiration ?? TimeSpan.FromMinutes(_configuration.GetValue<int>("Caching:DefaultExpirationMinutes"));
-            
-            var cacheEntryOptions = new MemoryCacheEntryOptions()
-                .SetAbsoluteExpiration(expirationTime);
-
-            _cache.Set(key, value, cacheEntryOptions);
-            
-            return value;
+            return await factory();
         }
 
-        public void Remove(string key)
+        if (cache.TryGetValue(key, out T? cachedValue))
         {
-            if (_isEnabled)
-            {
-                _cache.Remove(key);
-            }
+            return cachedValue ?? await factory();
+        }
+
+        var value = await factory();
+        var expirationTime = expiration ?? TimeSpan.FromMinutes(configuration.GetValue<int>("Caching:DefaultExpirationMinutes"));
+            
+        var cacheEntryOptions = new MemoryCacheEntryOptions()
+            .SetAbsoluteExpiration(expirationTime);
+
+        cache.Set(key, value, cacheEntryOptions);
+            
+        return value;
+    }
+
+    public void Remove(string key)
+    {
+        if (isEnabled)
+        {
+            cache.Remove(key);
         }
     }
-} 
+}

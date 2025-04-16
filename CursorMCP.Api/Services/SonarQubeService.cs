@@ -1,298 +1,262 @@
-using System;
-using System.Collections.Generic;
-using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Text;
 using System.Text.Json;
-using System.Threading.Tasks;
 using CursorMCP.Api.Models;
-using Microsoft.Extensions.Configuration;
 using System.Text.Json.Serialization;
-using System.Globalization;
-using System.Linq;
 using System.Text.RegularExpressions;
 using System.Web;
 using Microsoft.Extensions.Logging;
 using System.Net.Http.Json;
 
-namespace CursorMCP.Api.Services
+namespace CursorMCP.Api.Services;
+
+public class SonarQubeService(HttpClient httpClient, ICacheService cacheService, ILogger<SonarQubeService> logger) : ISonarQubeService
 {
-    public class SonarQubeService : ISonarQubeService
+    private readonly JsonSerializerOptions jsonOptions = new()
     {
-        private readonly HttpClient _httpClient;
-        private readonly IConfiguration _configuration;
-        private readonly JsonSerializerOptions _jsonOptions;
-        private readonly ICacheService _cacheService;
-        private readonly ILogger<SonarQubeService> _logger;
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter(), new DateTimeConverter() }
+    };
 
-        public SonarQubeService(HttpClient httpClient, IConfiguration configuration, ICacheService cacheService, ILogger<SonarQubeService> logger)
+    public async Task<List<SimplifiedSonarQubeIssue>> GetProjectIssuesAsync(string projectKey, int pageNumber = 1, int pageSize = 20)
+    {
+        var cacheKey = $"project_issues_{projectKey}_{pageNumber}_{pageSize}";
+        return await cacheService.GetOrSetAsync(cacheKey, async () =>
         {
-            _httpClient = httpClient;
-            _configuration = configuration;
-            _cacheService = cacheService;
-            _logger = logger;
+            logger.LogInformation("Getting project issues for {ProjectKey}", projectKey);
+            logger.LogInformation($"Requesting: api/issues/search?componentKeys={projectKey}&resolved=false&ps={pageSize}&p={pageNumber}");
 
-            _jsonOptions = new JsonSerializerOptions
+            var response = await httpClient.GetFromJsonAsync<SonarQubeIssuesResponse>(
+                $"api/issues/search?componentKeys={projectKey}&resolved=false&ps={pageSize}&p={pageNumber}",
+                jsonOptions);
+
+            if (response == null)
+                throw new InvalidOperationException("Failed to deserialize SonarQube response");
+
+            // Convert to simplified issues with only required properties
+            return response.Issues.Select(issue => new SimplifiedSonarQubeIssue
             {
-                PropertyNameCaseInsensitive = true,
-                Converters = { new JsonStringEnumConverter(), new DateTimeConverter() }
+                Key = issue.Key,
+                Rule = issue.Rule,
+                Component = issue.Component,
+                Project = issue.Project,
+                Message = issue.Message,
+                Type = issue.Type
+            }).ToList();
+        }, TimeSpan.FromMinutes(5));
+    }
+
+    public async Task<IssueSnippetSummaryResponse> GetIssueDetailsAsync(string issueKey)
+    {
+        var cacheKey = $"issue_details_{issueKey}";
+        return await cacheService.GetOrSetAsync(cacheKey, async () =>
+        {
+            logger.LogInformation("Getting issue details for {IssueKey}", issueKey);
+            logger.LogInformation($"Requesting: api/sources/issue_snippets?issueKey={issueKey}");
+
+            var response = await httpClient.GetFromJsonAsync<Dictionary<string, SonarQubeIssueDetails>>(
+                $"api/sources/issue_snippets?issueKey={issueKey}",
+                jsonOptions);
+
+            if (response == null || !response.Any())
+                throw new InvalidOperationException("Failed to deserialize SonarQube response");
+
+            var firstItem = response.First();
+            var issueDetails = firstItem.Value;
+
+            // Convert HTML code to plain text
+            var sources = issueDetails.Sources.Select(s => ConvertHtmlToPlainText(s.Code)).ToList();
+
+            return new IssueSnippetSummaryResponse
+            {
+                FileName = issueDetails.Component.Name,
+                Sources = string.Join("\n", sources)
             };
+        }, TimeSpan.FromMinutes(5));
+    }
 
-            var baseUrl = _configuration["SonarQube:BaseUrl"];
-            var token = _configuration["SonarQube:Token"];
+    public async Task<RuleFixSuggestionResponse> GetIssueFixSuggestionAsync(string issueKey)
+    {
+        var cacheKey = $"issue_fix_{issueKey}";
+        return await cacheService.GetOrSetAsync(cacheKey, async () =>
+        {
+            logger.LogInformation("Getting issue fix suggestion for {IssueKey}", issueKey);
+            logger.LogInformation($"Requesting: api/rules/show?key={issueKey}");
 
-            if (string.IsNullOrEmpty(baseUrl) || string.IsNullOrEmpty(token))
+            var response = await httpClient.GetFromJsonAsync<RuleResponse>(
+                $"api/rules/show?key={issueKey}",
+                jsonOptions);
+
+            if (response == null)
+                throw new InvalidOperationException("Failed to deserialize SonarQube response");
+
+            var fixSuggestion = new RuleFixSuggestionResponse();
+
+            foreach (var section in response.Rule.DescriptionSections)
             {
-                throw new InvalidOperationException("SonarQube configuration is missing. Please check appsettings.json");
+                switch (section.Key)
+                {
+                    case "introduction":
+                        fixSuggestion.Introduction = section.Content;
+                        break;
+                    case "root_cause":
+                        fixSuggestion.RootCause = section.Content;
+                        break;
+                    case "how_to_fix":
+                        fixSuggestion.HowToFix = section.Content;
+                        break;
+                }
             }
 
-            _httpClient.BaseAddress = new Uri(baseUrl);
-            _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", 
-                Convert.ToBase64String(Encoding.ASCII.GetBytes($"{token}:")));
-        }
-
-        public async Task<List<SimplifiedSonarQubeIssue>> GetProjectIssuesAsync(string projectKey, int pageNumber = 1, int pageSize = 20)
-        {
-            var cacheKey = $"project_issues_{projectKey}_{pageNumber}_{pageSize}";
-            return await _cacheService.GetOrSetAsync(cacheKey, async () =>
-            {
-                _logger.LogInformation("Getting project issues for {ProjectKey}", projectKey);
-                _logger.LogInformation($"Requesting: api/issues/search?componentKeys={projectKey}&resolved=false&ps={pageSize}&p={pageNumber}");
-
-                var response = await _httpClient.GetFromJsonAsync<SonarQubeIssuesResponse>(
-                    $"api/issues/search?componentKeys={projectKey}&resolved=false&ps={pageSize}&p={pageNumber}",
-                    _jsonOptions);
-
-                if (response == null)
-                    throw new InvalidOperationException("Failed to deserialize SonarQube response");
-
-                // Convert to simplified issues with only required properties
-                return response.Issues.Select(issue => new SimplifiedSonarQubeIssue
-                {
-                    Key = issue.Key,
-                    Rule = issue.Rule,
-                    Component = issue.Component,
-                    Project = issue.Project,
-                    Message = issue.Message,
-                    Type = issue.Type
-                }).ToList();
-            }, TimeSpan.FromMinutes(5));
-        }
-
-        public async Task<IssueSnippetSummaryResponse> GetIssueDetailsAsync(string issueKey)
-        {            
-            var cacheKey = $"issue_details_{issueKey}";
-            return await _cacheService.GetOrSetAsync(cacheKey, async () =>
-            {
-                _logger.LogInformation("Getting issue details for {IssueKey}", issueKey);
-                _logger.LogInformation($"Requesting: api/sources/issue_snippets?issueKey={issueKey}");
-
-                var response = await _httpClient.GetFromJsonAsync<Dictionary<string, SonarQubeIssueDetails>>(
-                    $"api/sources/issue_snippets?issueKey={issueKey}",
-                    _jsonOptions);
-
-                if (response == null || !response.Any())
-                    throw new InvalidOperationException("Failed to deserialize SonarQube response");
-
-                var firstItem = response.First();
-                var issueDetails = firstItem.Value;
-
-                // Convert HTML code to plain text
-                var sources = issueDetails.Sources.Select(s => ConvertHtmlToPlainText(s.Code)).ToList();
-                
-                return new IssueSnippetSummaryResponse
-                {
-                    FileName = issueDetails.Component.Name,
-                    Sources = string.Join("\n", sources)
-                };
-            }, TimeSpan.FromMinutes(5));
-        }
-
-        public async Task<RuleFixSuggestionResponse> GetIssueFixSuggestionAsync(string issueKey)
-        {
-            var cacheKey = $"issue_fix_{issueKey}";
-            return await _cacheService.GetOrSetAsync(cacheKey, async () =>
-            {
-                _logger.LogInformation("Getting issue fix suggestion for {IssueKey}", issueKey);
-                _logger.LogInformation($"Requesting: api/rules/show?key={issueKey}");
-
-                var response = await _httpClient.GetFromJsonAsync<RuleResponse>(
-                    $"api/rules/show?key={issueKey}",
-                    _jsonOptions);
-
-                if (response == null)
-                    throw new InvalidOperationException("Failed to deserialize SonarQube response");
-
-                var fixSuggestion = new RuleFixSuggestionResponse();
-                
-                foreach (var section in response.Rule.DescriptionSections)
-                {
-                    switch (section.Key)
-                    {
-                        case "introduction":
-                            fixSuggestion.Introduction = section.Content;
-                            break;
-                        case "root_cause":
-                            fixSuggestion.RootCause = section.Content;
-                            break;
-                        case "how_to_fix":
-                            fixSuggestion.HowToFix = section.Content;
-                            break;
-                    }
-                }
-
-                return fixSuggestion;
-            }, TimeSpan.FromMinutes(5));
-        }
-
-        private static string ConvertHtmlToPlainText(string html)
-        {
-            // Remove HTML tags
-            var text = Regex.Replace(html, "<[^>]*>", "");
-            
-            // Decode HTML entities
-            text = HttpUtility.HtmlDecode(text);
-            
-            return text;
-        }
+            return fixSuggestion;
+        }, TimeSpan.FromMinutes(5));
     }
 
-    public class DateTimeConverter : JsonConverter<DateTime>
+    private static string ConvertHtmlToPlainText(string html)
     {
-        public override DateTime Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            var dateString = reader.GetString();
-            return DateTime.Parse(dateString ?? throw new InvalidOperationException("Date string cannot be null"));
-        }
+        // Remove HTML tags
+        var text = Regex.Replace(html, "<[^>]*>", "");
 
-        public override void Write(Utf8JsonWriter writer, DateTime value, JsonSerializerOptions options)
-        {
-            writer.WriteStringValue(value.ToString("yyyy-MM-ddTHH:mm:ssZ"));
-        }
+        // Decode HTML entities
+        text = HttpUtility.HtmlDecode(text);
+
+        return text;
+    }
+}
+
+public class DateTimeConverter : JsonConverter<DateTime>
+{
+    public override DateTime Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        var dateString = reader.GetString();
+        return DateTime.Parse(dateString ?? throw new InvalidOperationException("Date string cannot be null"));
     }
 
-    public class SonarQubeIssuesResponse
+    public override void Write(Utf8JsonWriter writer, DateTime value, JsonSerializerOptions options)
     {
-        [JsonPropertyName("total")]
-        public int Total { get; set; }
-
-        [JsonPropertyName("p")]
-        public int Page { get; set; }
-
-        [JsonPropertyName("ps")]
-        public int PageSize { get; set; }
-
-        [JsonPropertyName("paging")]
-        public Paging Paging { get; set; } = new();
-
-        [JsonPropertyName("effortTotal")]
-        public int EffortTotal { get; set; }
-
-        [JsonPropertyName("issues")]
-        public List<SonarQubeIssue> Issues { get; set; } = new();
-
-        [JsonPropertyName("components")]
-        public List<Component> Components { get; set; } = new();
-
-        [JsonPropertyName("facets")]
-        public List<object> Facets { get; set; } = new();
+        writer.WriteStringValue(value.ToString("yyyy-MM-ddTHH:mm:ssZ"));
     }
+}
 
-    public class Paging
+public class SonarQubeIssuesResponse
+{
+    [JsonPropertyName("total")]
+    public int Total { get; set; }
+
+    [JsonPropertyName("p")]
+    public int Page { get; set; }
+
+    [JsonPropertyName("ps")]
+    public int PageSize { get; set; }
+
+    [JsonPropertyName("paging")]
+    public Paging Paging { get; set; } = new();
+
+    [JsonPropertyName("effortTotal")]
+    public int EffortTotal { get; set; }
+
+    [JsonPropertyName("issues")]
+    public List<SonarQubeIssue> Issues { get; set; } = [];
+
+    [JsonPropertyName("components")]
+    public List<Component> Components { get; set; } = [];
+
+    [JsonPropertyName("facets")]
+    public List<object> Facets { get; set; } = [];
+}
+
+public class Paging
+{
+    [JsonPropertyName("pageIndex")]
+    public int PageIndex { get; set; }
+
+    [JsonPropertyName("pageSize")]
+    public int PageSize { get; set; }
+
+    [JsonPropertyName("total")]
+    public int Total { get; set; }
+}
+
+public class Component
+{
+    [JsonPropertyName("key")]
+    public string Key { get; set; } = string.Empty;
+
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; }
+
+    [JsonPropertyName("qualifier")]
+    public string Qualifier { get; set; } = string.Empty;
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("longName")]
+    public string LongName { get; set; } = string.Empty;
+
+    [JsonPropertyName("path")]
+    public string Path { get; set; } = string.Empty;
+}
+
+public class IssueSnippetResponse
+{
+    [JsonPropertyName("fileName")]
+    public string FileName { get; set; } = string.Empty;
+
+    [JsonPropertyName("sources")]
+    public List<SourceLine> Sources { get; set; } = [];
+}
+
+public class IssueSnippetSummaryResponse
+{
+    [JsonPropertyName("fileName")]
+    public string FileName { get; set; } = string.Empty;
+
+    [JsonPropertyName("sources")]
+    public string Sources { get; set; } = string.Empty;
+}
+
+public class SourceLine
+{
+    [JsonPropertyName("line")]
+    public int Line { get; set; }
+
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = string.Empty;
+}
+
+public class RuleResponse
+{
+    [JsonPropertyName("rule")]
+    public Rule Rule { get; set; } = new();
+}
+
+public class Rule
+{
+    [JsonPropertyName("descriptionSections")]
+    public List<DescriptionSection> DescriptionSections { get; set; } = [];
+}
+
+public class DescriptionSection
+{
+    [JsonPropertyName("key")]
+    public string Key { get; set; } = string.Empty;
+
+    [JsonPropertyName("content")]
+    public string Content { get; set; } = string.Empty;
+}
+
+public class RuleFixSuggestionResponse
+{
+    [JsonPropertyName("introduction")]
+    public string Introduction { get; set; } = string.Empty;
+
+    [JsonPropertyName("root_cause")]
+    public string RootCause { get; set; } = string.Empty;
+
+    [JsonPropertyName("how_to_fix")]
+    public string HowToFix { get; set; } = string.Empty;
+
+    public override string ToString()
     {
-        [JsonPropertyName("pageIndex")]
-        public int PageIndex { get; set; }
-
-        [JsonPropertyName("pageSize")]
-        public int PageSize { get; set; }
-
-        [JsonPropertyName("total")]
-        public int Total { get; set; }
-    }
-
-    public class Component
-    {
-        [JsonPropertyName("key")]
-        public string Key { get; set; } = string.Empty;
-
-        [JsonPropertyName("enabled")]
-        public bool Enabled { get; set; }
-
-        [JsonPropertyName("qualifier")]
-        public string Qualifier { get; set; } = string.Empty;
-
-        [JsonPropertyName("name")]
-        public string Name { get; set; } = string.Empty;
-
-        [JsonPropertyName("longName")]
-        public string LongName { get; set; } = string.Empty;
-
-        [JsonPropertyName("path")]
-        public string Path { get; set; } = string.Empty;
-    }
-
-    public class IssueSnippetResponse
-    {
-        [JsonPropertyName("fileName")]
-        public string FileName { get; set; } = string.Empty;
-
-        [JsonPropertyName("sources")]
-        public List<SourceLine> Sources { get; set; } = new();
-    }
-
-    public class IssueSnippetSummaryResponse
-    {
-        [JsonPropertyName("fileName")]
-        public string FileName { get; set; } = string.Empty;
-
-        [JsonPropertyName("sources")]
-        public string Sources { get; set; } = string.Empty;
-    }
-
-    public class SourceLine
-    {
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
-
-        [JsonPropertyName("code")]
-        public string Code { get; set; } = string.Empty;
-    }
-
-    public class RuleResponse
-    {
-        [JsonPropertyName("rule")]
-        public Rule Rule { get; set; } = new();
-    }
-
-    public class Rule
-    {
-        [JsonPropertyName("descriptionSections")]
-        public List<DescriptionSection> DescriptionSections { get; set; } = new();
-    }
-
-    public class DescriptionSection
-    {
-        [JsonPropertyName("key")]
-        public string Key { get; set; } = string.Empty;
-
-        [JsonPropertyName("content")]
-        public string Content { get; set; } = string.Empty;
-    }
-
-    public class RuleFixSuggestionResponse
-    {
-        [JsonPropertyName("introduction")]
-        public string Introduction { get; set; } = string.Empty;
-
-        [JsonPropertyName("root_cause")]
-        public string RootCause { get; set; } = string.Empty;
-        
-        [JsonPropertyName("how_to_fix")]
-        public string HowToFix { get; set; } = string.Empty;
-
-        public override string ToString()
-        {
-            return $"Introduction: {Introduction}\nRoot Cause: {RootCause}\nHow to Fix: {HowToFix}";
-        }
+        return $"Introduction: {Introduction}\nRoot Cause: {RootCause}\nHow to Fix: {HowToFix}";
     }
 }
