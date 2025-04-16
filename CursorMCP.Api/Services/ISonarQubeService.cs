@@ -6,7 +6,7 @@ namespace CursorMCP.Api.Services
 {
     public interface ISonarQubeService
     {
-        Task<PaginatedResponse<List<SimplifiedSonarQubeIssue>>> GetProjectIssuesAsync(string projectKey, PaginationParameters paginationParams);
+        Task<List<SimplifiedSonarQubeIssue>> GetProjectIssuesAsync(string projectKey, int pageNumber = 1, int pageSize = 20);
         Task<IssueSnippetSummaryResponse> GetIssueDetailsAsync(string issueKey);
         Task<RuleFixSuggestionResponse> GetIssueFixSuggestionAsync(string ruleKey);
     }

@@ -51,20 +51,23 @@ namespace CursorMCP.Api.Services
                 Convert.ToBase64String(Encoding.ASCII.GetBytes($"{token}:")));
         }
 
-        public async Task<PaginatedResponse<List<SimplifiedSonarQubeIssue>>> GetProjectIssuesAsync(string projectKey, PaginationParameters parameters)
+        public async Task<List<SimplifiedSonarQubeIssue>> GetProjectIssuesAsync(string projectKey, int pageNumber = 1, int pageSize = 20)
         {
-            var cacheKey = $"project_issues_{projectKey}_{parameters.PageNumber}_{parameters.PageSize}";
+            var cacheKey = $"project_issues_{projectKey}_{pageNumber}_{pageSize}";
             return await _cacheService.GetOrSetAsync(cacheKey, async () =>
             {
+                _logger.LogInformation("Getting project issues for {ProjectKey}", projectKey);
+                _logger.LogInformation($"Requesting: api/issues/search?componentKeys={projectKey}&resolved=false&ps={pageSize}&p={pageNumber}");
+
                 var response = await _httpClient.GetFromJsonAsync<SonarQubeIssuesResponse>(
-                    $"api/issues/search?componentKeys={projectKey}&resolved=false&ps={parameters.PageSize}&p={parameters.PageNumber}",
+                    $"api/issues/search?componentKeys={projectKey}&resolved=false&ps={pageSize}&p={pageNumber}",
                     _jsonOptions);
 
                 if (response == null)
                     throw new InvalidOperationException("Failed to deserialize SonarQube response");
 
                 // Convert to simplified issues with only required properties
-                var simplifiedIssues = response.Issues.Select(issue => new SimplifiedSonarQubeIssue
+                return response.Issues.Select(issue => new SimplifiedSonarQubeIssue
                 {
                     Key = issue.Key,
                     Rule = issue.Rule,
@@ -73,13 +76,6 @@ namespace CursorMCP.Api.Services
                     Message = issue.Message,
                     Type = issue.Type
                 }).ToList();
-
-                return new PaginatedResponse<List<SimplifiedSonarQubeIssue>>(
-                    simplifiedIssues,
-                    response.Total,
-                    parameters.PageNumber,
-                    parameters.PageSize
-                );
             }, TimeSpan.FromMinutes(5));
         }
 
@@ -88,6 +84,9 @@ namespace CursorMCP.Api.Services
             var cacheKey = $"issue_details_{issueKey}";
             return await _cacheService.GetOrSetAsync(cacheKey, async () =>
             {
+                _logger.LogInformation("Getting issue details for {IssueKey}", issueKey);
+                _logger.LogInformation($"Requesting: api/sources/issue_snippets?issueKey={issueKey}");
+
                 var response = await _httpClient.GetFromJsonAsync<Dictionary<string, SonarQubeIssueDetails>>(
                     $"api/sources/issue_snippets?issueKey={issueKey}",
                     _jsonOptions);
@@ -114,6 +113,9 @@ namespace CursorMCP.Api.Services
             var cacheKey = $"issue_fix_{issueKey}";
             return await _cacheService.GetOrSetAsync(cacheKey, async () =>
             {
+                _logger.LogInformation("Getting issue fix suggestion for {IssueKey}", issueKey);
+                _logger.LogInformation($"Requesting: api/rules/show?key={issueKey}");
+
                 var response = await _httpClient.GetFromJsonAsync<RuleResponse>(
                     $"api/rules/show?key={issueKey}",
                     _jsonOptions);
@@ -287,5 +289,10 @@ namespace CursorMCP.Api.Services
         
         [JsonPropertyName("how_to_fix")]
         public string HowToFix { get; set; } = string.Empty;
+
+        public override string ToString()
+        {
+            return $"Introduction: {Introduction}\nRoot Cause: {RootCause}\nHow to Fix: {HowToFix}";
+        }
     }
 }

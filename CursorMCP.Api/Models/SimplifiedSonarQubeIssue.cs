@@ -21,5 +21,11 @@ namespace CursorMCP.Api.Models
 
         [JsonPropertyName("type")]
         public string Type { get; set; } = string.Empty;
+
+        // Override ToString method to return a string representation of the issue, each property on a new line
+        public override string ToString()
+        {
+            return $"Key: {Key}\nRule: {Rule}\nComponent: {Component}\nProject: {Project}\nMessage: {Message}\nType: {Type}";
+        }
     }
 } 

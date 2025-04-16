@@ -29,9 +29,9 @@ namespace CursorMCP.Api.Controllers
         /// <param name="pageSize">Page size (default: 20, max: 100)</param>
         /// <returns>A paginated list of issues</returns>
         [HttpGet("projects/{projectKey}/issues")]
-        [ProducesResponseType(typeof(PaginatedResponse<List<SimplifiedSonarQubeIssue>>), 200)]
+        [ProducesResponseType(typeof(List<SimplifiedSonarQubeIssue>), 200)]
         [ProducesResponseType(404)]
-        public async Task<ActionResult<PaginatedResponse<List<SimplifiedSonarQubeIssue>>>> GetProjectIssues(
+        public async Task<ActionResult<List<SimplifiedSonarQubeIssue>>> GetProjectIssues(
             string projectKey, 
             [FromQuery] int pageNumber = 1, 
             [FromQuery] int pageSize = 20)
@@ -39,15 +39,9 @@ namespace CursorMCP.Api.Controllers
             _logger.LogInformation("Getting issues for project {ProjectKey} with page {PageNumber} and page size {PageSize}", 
                 projectKey, pageNumber, pageSize);
 
-            var paginationParams = new PaginationParameters
-            {
-                PageNumber = pageNumber,
-                PageSize = pageSize
-            };
-
-            var result = await _sonarQubeService.GetProjectIssuesAsync(projectKey, paginationParams);
+            var result = await _sonarQubeService.GetProjectIssuesAsync(projectKey, pageNumber, pageSize);
             
-            if (result.Data == null || result.Data.Count == 0)
+            if (result == null || result.Count == 0)
             {
                 _logger.LogWarning("No issues found for project {ProjectKey}", projectKey);
                 return NotFound();

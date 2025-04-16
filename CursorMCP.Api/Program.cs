@@ -1,22 +1,35 @@
-using CursorMCP.Api.Services;
+using System.IO;
+using System.Net.Http.Headers;
+
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.OpenApi.Models;
+
+using CursorMCP.Api.Services;
+
+using ModelContextProtocol;
+
 using Serilog;
 using Serilog.Events;
-using System.IO;
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = Host.CreateEmptyApplicationBuilder(settings: null);
+builder.Services.AddMcpServer()
+    .WithStdioServerTransport()
+    .WithToolsFromAssembly();
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddControllers();
 
 // Configure Serilog
 var logPath = builder.Configuration.GetValue<string>("Logging:File:Path") ?? "logs/sonarqube-api.log";
 var fileSizeLimitBytes = builder.Configuration.GetValue<long>("Logging:File:FileSizeLimitBytes", 10485760);
 var maxRollingFiles = builder.Configuration.GetValue<int>("Logging:File:MaxRollingFiles", 5);
+
+// Ensure logs directory exists
+var logsDir = Path.GetDirectoryName(logPath);
+if (!string.IsNullOrEmpty(logsDir) && !Directory.Exists(logsDir))
+{
+    Directory.CreateDirectory(logsDir);
+}
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
@@ -28,43 +41,14 @@ Log.Logger = new LoggerConfiguration()
         rollingInterval: RollingInterval.Day,
         retainedFileCountLimit: maxRollingFiles)
     .CreateLogger();
-
-builder.Host.UseSerilog();
-
 // Register services
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpClient();
-builder.Services.AddScoped<ICacheService, CacheService>();
-builder.Services.AddScoped<ISonarQubeService, SonarQubeService>();
+builder.Services.AddSingleton<ICacheService, CacheService>();
+builder.Services.AddSingleton<ISonarQubeService, SonarQubeService>();
 
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c =>
-{
-    c.SwaggerDoc("v1", new OpenApiInfo { Title = "SonarQube MCP API", Version = "v1" });
-});
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI(c =>
-    {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "SonarQube MCP API V1");
-    });
-}
 
-app.UseHttpsRedirection();
-app.UseAuthorization();
-app.MapControllers();
-
-// Ensure logs directory exists
-var logsDir = Path.GetDirectoryName(logPath);
-if (!string.IsNullOrEmpty(logsDir) && !Directory.Exists(logsDir))
-{
-    Directory.CreateDirectory(logsDir);
-}
-
-app.Run();
+await app.RunAsync();
